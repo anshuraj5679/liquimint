@@ -9,7 +9,6 @@ import { injected } from 'wagmi/connectors';
 const config = createConfig({
   chains: [polygonAmoy],
   multiInjectedProviderDiscovery: false,
-  storage: null,
   connectors: [
     injected({
       target: 'metaMask',
@@ -59,7 +58,7 @@ export function Web3Provider({ children }: { children: React.ReactNode }) {
   }, []);
 
   return (
-    <WagmiProvider config={config} reconnectOnMount={false}>
+    <WagmiProvider config={config} reconnectOnMount>
       <QueryClientProvider client={queryClient}>
         {children}
       </QueryClientProvider>

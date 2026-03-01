@@ -361,12 +361,12 @@ export default function CreatorDashboard() {
                     >
                       View on Polygonscan
                     </a>
-                    <a
+                    <Link
                       href={`/token/${deployedAddress}`}
                       className="text-primary-500 text-sm underline block"
                     >
                       Open in LiquiMint
-                    </a>
+                    </Link>
                   </div>
                 )}
 

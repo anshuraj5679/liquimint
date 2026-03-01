@@ -6,9 +6,12 @@ import { Shield, Users, MessageSquare, CandlestickChart } from 'lucide-react';
 import { BondingCurveAnalytics } from '@/components/BondingCurveAnalytics';
 import { useGetTokenInfo } from '@/hooks/useBondingCurveFactory';
 import { useAccount, usePublicClient, useReadContract, useWriteContract } from 'wagmi';
-import { BaseError, parseEther, formatEther } from 'viem';
+import { BaseError, parseEther, formatEther, parseGwei } from 'viem';
 import BondingCurveTokenABI from '@/config/abis/BondingCurveToken.json';
 import PageHeader from '@/components/PageHeader';
+
+const MIN_PRIORITY_FEE_WEI = parseGwei('25');
+const MIN_MAX_FEE_WEI = parseGwei('60');
 
 export default function TokenPage({ params }: any) {
   const unwrappedParams = use(params) as { address: string };
@@ -96,15 +99,45 @@ export default function TokenPage({ params }: any) {
     [publicClient]
   );
 
+  const getFeeOverrides = useCallback(async () => {
+    let maxPriorityFeePerGas = MIN_PRIORITY_FEE_WEI;
+    let maxFeePerGas = MIN_MAX_FEE_WEI;
+
+    if (publicClient) {
+      try {
+        const estimated = await publicClient.estimateFeesPerGas({ type: 'eip1559' });
+        if (estimated.maxPriorityFeePerGas && estimated.maxPriorityFeePerGas > maxPriorityFeePerGas) {
+          maxPriorityFeePerGas = estimated.maxPriorityFeePerGas;
+        }
+        if (estimated.maxFeePerGas && estimated.maxFeePerGas > maxFeePerGas) {
+          maxFeePerGas = estimated.maxFeePerGas;
+        }
+      } catch {
+        // Keep floor values when fee estimation is unavailable.
+      }
+    }
+
+    if (maxFeePerGas < maxPriorityFeePerGas) {
+      maxFeePerGas = maxPriorityFeePerGas * 2n;
+    }
+
+    return {
+      maxPriorityFeePerGas,
+      maxFeePerGas,
+    };
+  }, [publicClient]);
+
   const handleBuy = useCallback(async () => {
     if (!buyAmount || !userAddress) return;
     try {
       showStatus(`Submitting buy for ${buyAmount} MATIC...`, 'info');
+      const feeOverrides = await getFeeOverrides();
       const hash = await buyTokens({
         address: tokenAddress,
         abi: BondingCurveTokenABI,
         functionName: 'buy',
         value: parseEther(buyAmount),
+        ...feeOverrides,
       });
       showStatus('Waiting for confirmation...', 'info');
       await waitForReceipt(hash);
@@ -113,17 +146,19 @@ export default function TokenPage({ params }: any) {
     } catch (error) {
       showStatus(getErrorMessage(error), 'error');
     }
-  }, [buyAmount, userAddress, buyTokens, tokenAddress, waitForReceipt, showStatus, getErrorMessage]);
+  }, [buyAmount, userAddress, buyTokens, tokenAddress, waitForReceipt, showStatus, getErrorMessage, getFeeOverrides]);
 
   const handleSell = useCallback(async () => {
     if (!sellAmount || !userAddress) return;
     try {
       showStatus(`Submitting sell for ${sellAmount} tokens...`, 'info');
+      const feeOverrides = await getFeeOverrides();
       const hash = await sellTokens({
         address: tokenAddress,
         abi: BondingCurveTokenABI,
         functionName: 'sell',
         args: [parseEther(sellAmount)],
+        ...feeOverrides,
       });
       showStatus('Waiting for confirmation...', 'info');
       await waitForReceipt(hash);
@@ -132,7 +167,7 @@ export default function TokenPage({ params }: any) {
     } catch (error) {
       showStatus(getErrorMessage(error), 'error');
     }
-  }, [sellAmount, userAddress, sellTokens, tokenAddress, waitForReceipt, showStatus, getErrorMessage]);
+  }, [sellAmount, userAddress, sellTokens, tokenAddress, waitForReceipt, showStatus, getErrorMessage, getFeeOverrides]);
 
   const displayName = (tokenInfo as any)?.name || (onChainName as string) || 'Token';
   const displaySymbol = (tokenInfo as any)?.symbol || (onChainSymbol as string) || 'TOKEN';

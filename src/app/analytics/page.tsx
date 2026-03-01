@@ -1,5 +1,6 @@
 'use client';
 
+import { useMemo } from 'react';
 import { Card } from '@/design-system/components';
 import { TrendingUp, DollarSign, Activity, Users, Radar } from 'lucide-react';
 import { usePlatformMetrics } from '@/hooks/usePlatformMetrics';
@@ -10,16 +11,38 @@ import PageHeader from '@/components/PageHeader';
 
 function formatMaticString(value: string | null, precision = 4): string {
   if (value === null) return 'Unavailable';
-  return `${Number(value).toFixed(precision)} MATIC`;
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 'Unavailable';
+  return `${parsed.toFixed(precision)} MATIC`;
+}
+
+function formatVolume(value: bigint | null, precision = 4): string {
+  if (value === null) return 'Unavailable';
+  try {
+    const parsed = Number(formatEther(value));
+    if (!Number.isFinite(parsed)) return 'Unavailable';
+    return `${parsed.toFixed(precision)} MATIC`;
+  } catch {
+    return 'Unavailable';
+  }
 }
 
 export default function AnalyticsPage() {
   const { metrics, isLoading: isMetricsLoading, error: metricsError } = usePlatformMetrics();
   const { tokens, isLoading: isTokensLoading, error: tokensError } = useFactoryTokens();
 
-  const topByVolume = [...tokens]
-    .sort((a, b) => Number((b.totalVolume || 0n) - (a.totalVolume || 0n)))
-    .slice(0, 5);
+  const topByVolume = useMemo(
+    () =>
+      [...tokens]
+        .sort((a, b) => {
+          const aVolume = a.totalVolume ?? 0n;
+          const bVolume = b.totalVolume ?? 0n;
+          if (aVolume === bVolume) return 0;
+          return aVolume > bVolume ? -1 : 1;
+        })
+        .slice(0, 5),
+    [tokens]
+  );
 
   return (
     <div className="page-shell">
@@ -115,7 +138,7 @@ export default function AnalyticsPage() {
                     </div>
                     <div className="text-right">
                       <p className="text-slate-900 font-semibold">
-                        {token.totalVolume !== null ? `${Number(formatEther(token.totalVolume)).toFixed(4)} MATIC` : 'Unavailable'}
+                        {formatVolume(token.totalVolume)}
                       </p>
                       <p className="text-neutral-500 text-xs">Volume</p>
                     </div>
