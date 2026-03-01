@@ -1,0 +1,11 @@
+# Ignore heavy dev/build artifacts from Vercel deployments
+artifacts/
+cache/
+coverage/
+contracts/
+scripts/
+test/
+docs/
+hardhat.config.js
+
+
