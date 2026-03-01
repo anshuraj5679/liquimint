@@ -1,25 +1,110 @@
-# LiquiMint (Polygon Amoy)
+# LiquiMint
 
-Bonding-curve token launch + trading stack with LP graduation and LP locking.
+Liquidity bootstrapping for new tokens usually fails at launch: teams need upfront capital, price discovery is opaque, and trust drops when liquidity is unlocked or unmanaged. LiquiMint addresses this with a bonding-curve launch flow, automated graduation into DEX liquidity, and on-chain LP lock controls.
 
-## Implemented Core Flows
-- Create token (`BondingCurveFactoryV3.createToken`)
-- Buy token (`BondingCurveToken.buy`)
-- Sell token (`BondingCurveToken.sell`)
-- Graduate token to DEX LP (`BondingCurveFactoryV3.manualGraduate` / threshold path)
-- Lock LP (`LiquidityController.lockLiquidity`)
-- Unlock LP (`LiquidityController.unlockLiquidity`)
+## Problem
+Most early token launches face three structural issues:
+- **Capital barrier**: creators need initial liquidity before users can trade.
+- **Weak price discovery**: thin markets and manual listing create unstable pricing.
+- **Trust risk**: liquidity can be removed or managed opaquely after launch.
 
-## Tech Stack
-- Next.js 16 + React 19 + TypeScript
-- Wagmi + Viem
-- Solidity 0.8.20 + Hardhat
+## Solution
+LiquiMint is a Polygon Amoy dApp that combines:
+- **Bonding-curve token launch** (`BondingCurveFactoryV3` + `BondingCurveToken`)
+- **Direct buy/sell from the curve** before DEX listing
+- **Graduation to DEX LP** once TVL threshold is met
+- **LP locking via LiquidityController** to improve post-graduation trust
 
-## Contracts in Repo
+This keeps launch friction low while enforcing transparent on-chain liquidity controls.
+
+## Core Product Flows
+1. **Create token**
+- `BondingCurveFactoryV3.createToken`
+
+2. **Trade on bonding curve**
+- `BondingCurveToken.buy`
+- `BondingCurveToken.sell`
+
+3. **Graduate to DEX liquidity**
+- Auto via threshold or owner-triggered `manualGraduate`
+- Graduation uses slippage-bounded LP add
+
+4. **Lock / unlock LP**
+- `LiquidityController.lockLiquidity`
+- `LiquidityController.unlockLiquidity`
+- Emergency unlock path with penalty
+
+## Architecture Breakdown
+### 1) On-Chain Layer
+Contracts:
 - `contracts/bonding/BondingCurveFactoryV3.sol`
 - `contracts/bonding/BondingCurveToken.sol`
 - `contracts/security/LiquidityController.sol`
-- Test mocks under `contracts/mocks/`
+- DEX interfaces in `contracts/interfaces/`
+
+Design highlights:
+- Factory tracks token lifecycle and trading stats
+- Trader attribution is explicit (no `tx.origin` trade attribution)
+- Graduation mints curve-quoted liquidity, not arbitrary token amounts
+- LP add on graduation uses configurable slippage bounds (`graduationSlippageBps`)
+- Token and LP transfers use `SafeERC20` in critical paths
+
+### 2) Frontend Layer (Next.js App Router)
+Pages:
+- `/` landing
+- `/creator` token creation
+- `/trade` bonding-curve market UI
+- `/liquidity` LP lock/reward operations
+- `/analytics` platform analytics
+- `/token/[address]` token detail view
+
+Stack:
+- Next.js 16, React 19, TypeScript
+- Wagmi + Viem for wallet/chain interactions
+- Tailwind + component primitives under `src/design-system`
+
+### 3) API / Service Layer (Next.js API routes)
+Endpoints:
+- `/api/ai-assistant` and `/api/copilot` for AI guidance
+- `/api/simulate` for transaction simulation insights
+- `/api/metrics/platform` cached platform metrics
+- `/api/metrics/tokens` cached token list metrics
+
+Notes:
+- APIs degrade gracefully when external keys/providers are unavailable
+- Metrics are server-cached to avoid heavy client-side RPC scans
+
+### 4) DevOps / Deployment Layer
+- Hardhat for compile/test/deploy
+- Scripted deployments in `scripts/`
+- Frontend ABI/address sync via `scripts/sync-frontend.js`
+- Post-deploy verification script: `scripts/post-deploy-checks.js`
+
+## Repository Structure
+```text
+contracts/
+  bonding/
+  interfaces/
+  mocks/
+  security/
+scripts/
+src/
+  app/
+  components/
+  config/
+  design-system/
+  hooks/
+  providers/
+test/
+```
+
+## Security & Governance Notes
+- No private keys or secrets committed in source
+- LP graduation uses non-zero slippage safeguards
+- Liquidity lock operations are covered with negative-path tests
+- Deployment supports governance owner separation:
+  - `GOVERNANCE_OWNER`
+  - optional timelock deployment via `deploy:governance`
 
 ## Local Setup
 ```bash
@@ -27,44 +112,41 @@ npm install
 cp .env.example .env
 ```
 
-Required env keys:
-- `AMOY_RPC_URL` (or `RPC_URL` legacy fallback)
+Minimum env values:
+- `AMOY_RPC_URL` (or `RPC_URL` fallback)
 - `PRIVATE_KEY`
 - `DEX_ROUTER`
-- `GOVERNANCE_OWNER` (recommended multisig/timelock owner for new deployments)
-- `GOVERNANCE_PROPOSER` + `GOVERNANCE_EXECUTOR` (for timelock deployment)
+- `GOVERNANCE_OWNER`
+- `GOVERNANCE_PROPOSER`
+- `GOVERNANCE_EXECUTOR`
 
-Optional server APIs:
+Optional APIs:
 - `GEMINI_API_KEY`
 - `GEMINI_MODEL` (default: `gemini-2.5-flash`)
 - `TENDERLY_API_KEY`
-- `TENDERLY_ACCOUNT_SLUG` + `TENDERLY_PROJECT_SLUG` (for project-scoped Tenderly simulate endpoint)
+- `TENDERLY_ACCOUNT_SLUG`
+- `TENDERLY_PROJECT_SLUG`
 
-## Validate
+## Development Commands
 ```bash
+npm run dev
 npm run lint
 npm run typecheck
-npm test
-```
-
-## Compile
-```bash
 npm run compile
+npm test
+npm run test:coverage
 ```
 
-## Deploy (Amoy)
+## Deployment Commands (Amoy)
 ```bash
 npm run deploy:governance
 npm run deploy:complete
+npm run verify:postdeploy
 ```
 
-This deploys:
-1. `TimelockController` (when `deploy:governance` is run)
-2. `LiquidityController` (unless `LIQUIDITY_CONTROLLER` is provided)
-3. `BondingCurveFactoryV3`
-4. Syncs frontend addresses + ABIs via `scripts/sync-frontend.js`
-
-Deployment output is written to `deployment-amoy.json`.
+Outputs:
+- Deployment metadata is written to `deployment-amoy.json` (gitignored)
+- Frontend contract config/ABIs sync through `npm run sync:frontend`
 
 ## Vercel Deployment
 Build command:
@@ -72,18 +154,20 @@ Build command:
 npm run build
 ```
 
-Minimum recommended env vars on Vercel:
+Recommended Vercel env vars:
 - `NEXT_PUBLIC_BONDING_FACTORY`
 - `NEXT_PUBLIC_LIQUIDITY_CONTROLLER`
 - `AMOY_RPC_URL` (or `RPC_URL`)
 
-Optional runtime APIs:
-- `GEMINI_API_KEY` and `GEMINI_MODEL`
-- `TENDERLY_API_KEY` (+ optional `TENDERLY_ACCOUNT_SLUG`, `TENDERLY_PROJECT_SLUG`)
+Optional runtime env vars:
+- `GEMINI_API_KEY`, `GEMINI_MODEL`
+- `TENDERLY_API_KEY`, `TENDERLY_ACCOUNT_SLUG`, `TENDERLY_PROJECT_SLUG`
 
-## Important Behavior
-- No hardcoded API keys or private keys in source.
-- No mock/fabricated "live" metrics in primary trading/analytics pages.
-- If data is unavailable from RPC/API, UI/API returns explicit unavailable/error state.
-- Graduation LP add uses non-zero slippage bounds via `graduationSlippageBps`.
-- Trade events now attribute `trader` from token-call context, not `tx.origin`.
+## Validation Status (Current)
+Project currently passes:
+- `npm run lint`
+- `npm run typecheck`
+- `npm run build`
+- `npm test`
+
+This repository is configured for a smooth Vercel deployment and includes both unit/integration contract tests and post-deploy verification scripts for Amoy.
